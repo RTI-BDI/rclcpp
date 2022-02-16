@@ -158,7 +158,7 @@ int DynamicMultiThreadedExecutor::spawn_new_consumer(DispatcherData* dispatcher_
 
   uint16_t new_cons_i = dmt_exec->number_of_consumers_;//new consumer index
   dmt_exec->number_of_consumers_++;
-  
+
   pthread_t new_cons_thread;
   struct sched_param new_cons_param;
   pthread_attr_t new_cons_attr;
@@ -170,14 +170,12 @@ int DynamicMultiThreadedExecutor::spawn_new_consumer(DispatcherData* dispatcher_
   dmt_exec->busy_[new_cons_i].store(false);
   dmt_exec->callbacks_.push_back(AnyExecutable{});
 
-  ConsumerData cons_data{dmt_exec, new_cons_i};
-
   err += pthread_setup(&(dmt_exec->consumers_params_[new_cons_i]), &(dmt_exec->consumers_attr_[new_cons_i]), 
                           dispatcher_data->policy, dispatcher_data->base_consumer_priority/*, sizeof(int)*/);
 
   if(!err)
     err += pthread_create(&(dmt_exec->consumers_[new_cons_i]), &(dmt_exec->consumers_attr_[new_cons_i]), 
-                            DynamicMultiThreadedExecutor::consumer_run, &cons_data);
+                            DynamicMultiThreadedExecutor::consumer_run, &(dmt_exec->consumers_data_[new_cons_i]));
   if(err)
   {
     //clean up pushed elements and set back number of consumer to original
@@ -195,9 +193,9 @@ int DynamicMultiThreadedExecutor::spawn_new_consumer(DispatcherData* dispatcher_
 /*
   Returns index of the first false boolean within the busy array
 */
-static int get_free_consumer(const std::vector<std::atomic_bool>& busy)
+static int get_free_consumer(const std::vector<std::atomic_bool>& busy, const uint16_t& number_of_consumers)
 {
-  for(u_int16_t i=0; i < (static_cast<uint16_t> (busy.size())); i++)
+  for(u_int16_t i=0; i < number_of_consumers; i++)
     if(!busy[i].load())
       return i;//free consumer
   return -1;
@@ -229,7 +227,7 @@ void *DynamicMultiThreadedExecutor::consumer_run(void *data)
 
 void *DynamicMultiThreadedExecutor::dispatcher_run(void *data)
 {
-  ////printf("Dispatcher of DMT rclcpp Executor started\n");
+  //printf("Dispatcher of DMT rclcpp Executor started\n");
   DispatcherData *d_data = (DispatcherData *)data;
   DynamicMultiThreadedExecutor* dmt_exec = d_data->dmt_executor;
   int err = spawn_new_consumers(d_data);
@@ -241,10 +239,10 @@ void *DynamicMultiThreadedExecutor::dispatcher_run(void *data)
 
       if (dmt_exec->get_next_executable(any_executable, std::chrono::nanoseconds(dmt_exec->uwait_dispatcher_), false)) {//wait for 5us for work to become available if none, before new polling
         //printf("Dispatching a callback of type=%s\n", (any_executable.timer)? "timer" : (any_executable.subscription)? "subscription" : "other");
-        int free_cons_i = get_free_consumer(dmt_exec->busy_);
+        int free_cons_i = get_free_consumer(dmt_exec->busy_, dmt_exec->number_of_consumers_);
         if(free_cons_i == -1)
         {
-          //printf("No free consumer found for executing a callback of type=%s\n", (any_executable.timer)? "timer" : (any_executable.subscription)? "subscription" : "other");
+          //printf("No free consumer found: %d consumers are not enough!\n", dmt_exec->number_of_consumers_);
           //no free consumer, spawn new consumer thread
           err = spawn_new_consumer(d_data);
           if(err)//error during spawning
