@@ -214,7 +214,7 @@ Executor::spin_node_some(std::shared_ptr<rclcpp::Node> node)
 }
 
 void
-Executor::spin_some(std::chrono::nanoseconds max_duration)
+Executor::spin_some(std::chrono::nanoseconds max_duration, const bool& highest_pr_first)
 {
   if (nullptr != dynamic_cast<executors::StaticSingleThreadedExecutor *>(this)) {
     throw rclcpp::exceptions::UnimplementedError(
@@ -223,6 +223,7 @@ Executor::spin_some(std::chrono::nanoseconds max_duration)
   }
 
   auto start = std::chrono::steady_clock::now();
+  //TODO(Devis) rewrite fun below with global
   auto max_duration_not_elapsed = [max_duration, start]() {
       if (std::chrono::nanoseconds(0) == max_duration) {
         // told to spin forever if need be
@@ -243,7 +244,7 @@ Executor::spin_some(std::chrono::nanoseconds max_duration)
   wait_for_work(std::chrono::milliseconds::zero());
   while (rclcpp::ok(context_) && spinning.load() && max_duration_not_elapsed()) {
     AnyExecutable any_exec;
-    if (get_next_ready_executable(any_exec)) {
+    if (get_next_ready_executable(any_exec, highest_pr_first)) {
       execute_any_executable(any_exec);
     } else {
       break;
@@ -252,16 +253,16 @@ Executor::spin_some(std::chrono::nanoseconds max_duration)
 }
 
 void
-Executor::spin_once_impl(std::chrono::nanoseconds timeout)
+Executor::spin_once_impl(std::chrono::nanoseconds timeout, const bool& highest_pr_first)
 {
   AnyExecutable any_exec;
-  if (get_next_executable(any_exec, timeout)) {
+  if (get_next_executable(any_exec, timeout, highest_pr_first)) {
     execute_any_executable(any_exec);
   }
 }
 
 void
-Executor::spin_once(std::chrono::nanoseconds timeout)
+Executor::spin_once(std::chrono::nanoseconds timeout, const bool& highest_pr_first)
 {
   if (nullptr != dynamic_cast<executors::StaticSingleThreadedExecutor *>(this)) {
     throw rclcpp::exceptions::UnimplementedError(
@@ -272,7 +273,7 @@ Executor::spin_once(std::chrono::nanoseconds timeout)
     throw std::runtime_error("spin_once() called while already spinning");
   }
   RCLCPP_SCOPE_EXIT(this->spinning.store(false); );
-  spin_once_impl(timeout);
+  spin_once_impl(timeout, highest_pr_first);
 }
 
 void
@@ -463,15 +464,19 @@ Executor::execute_client(
 void
 Executor::wait_for_work(std::chrono::nanoseconds timeout)
 {
+  //printf("wait_for_work called by the Executor\n");
   {
     std::unique_lock<std::mutex> lock(memory_strategy_mutex_);
-
+    //printf("[wait_for_work]: lock acquired\n");
     // Collect the subscriptions and timers to be waited on
     memory_strategy_->clear_handles();
+    //printf("[wait_for_work]: clear_handles\n");
     bool has_invalid_weak_nodes = memory_strategy_->collect_entities(weak_nodes_);
+    //printf("[wait_for_work]: collect_entities\n");
 
     // Clean up any invalid nodes, if they were detected
     if (has_invalid_weak_nodes) {
+      //printf("[wait_for_work]: has invalid_nodes\n");
       auto node_it = weak_nodes_.begin();
       auto gc_it = guard_conditions_.begin();
       while (node_it != weak_nodes_.end()) {
@@ -485,11 +490,15 @@ Executor::wait_for_work(std::chrono::nanoseconds timeout)
         }
       }
     }
+    //printf("[wait_for_work]: invalid_nodes if branch handled\n");
+
     // clear wait set
     rcl_ret_t ret = rcl_wait_set_clear(&wait_set_);
     if (ret != RCL_RET_OK) {
+      //printf("Error 1\n");
       throw_from_rcl_error(ret, "Couldn't clear wait set");
     }
+    //printf("[wait_for_work]: wait_set cleared\n");
 
     // The size of waitables are accounted for in size of the other entities
     ret = rcl_wait_set_resize(
@@ -498,27 +507,39 @@ Executor::wait_for_work(std::chrono::nanoseconds timeout)
       memory_strategy_->number_of_ready_clients(), memory_strategy_->number_of_ready_services(),
       memory_strategy_->number_of_ready_events());
     if (RCL_RET_OK != ret) {
+      //printf("Error 2\n");
       throw_from_rcl_error(ret, "Couldn't resize the wait set");
     }
+    //printf("[wait_for_work]: wait_set resized\n");
 
     if (!memory_strategy_->add_handles_to_wait_set(&wait_set_)) {
+      //printf("Error 3\n");
       throw std::runtime_error("Couldn't fill wait set");
     }
+    //printf("[wait_for_work]: after add_handles_to_wait_set()\n");
   }
+  
+  //printf("[wait_for_work]: just BEFORE rcl_wait()\n");
   rcl_ret_t status =
     rcl_wait(&wait_set_, std::chrono::duration_cast<std::chrono::nanoseconds>(timeout).count());
+  //printf("[wait_for_work]: just AFTER rcl_wait()\n");
   if (status == RCL_RET_WAIT_SET_EMPTY) {
     RCUTILS_LOG_WARN_NAMED(
       "rclcpp",
       "empty wait set received in rcl_wait(). This should never happen.");
+      //printf("[wait_for_work]: empty wait set received in rcl_wait(). This should never happen.\n");
   } else if (status != RCL_RET_OK && status != RCL_RET_TIMEOUT) {
     using rclcpp::exceptions::throw_from_rcl_error;
+    //printf("Error 4\n");
     throw_from_rcl_error(status, "rcl_wait() failed");
   }
+  //printf("[wait_for_work]: after rcl_wait()\n");
 
   // check the null handles in the wait set and remove them from the handles in memory strategy
   // for callback-based entities
   memory_strategy_->remove_null_handles(&wait_set_);
+  //printf("[wait_for_work]: after remove_null_handles()\n");
+
 }
 
 rclcpp::node_interfaces::NodeBaseInterface::SharedPtr
@@ -568,14 +589,26 @@ Executor::get_group_by_timer(rclcpp::TimerBase::SharedPtr timer)
 }
 
 bool
-Executor::get_next_ready_executable(AnyExecutable & any_executable)
+Executor::get_next_ready_executable(AnyExecutable & any_executable, const bool& highest_pr_first)
 {
   bool success = false;
-  // Check the timers to see if there are any that are ready
-  memory_strategy_->get_next_timer(any_executable, weak_nodes_);
-  if (any_executable.timer) {
-    success = true;
+  
+  //TODO(Devis) take in consideration priority for callback here !!!
+  if(highest_pr_first)
+  {
+    memory_strategy_->get_next_highest_pr_executable(any_executable, weak_nodes_);
+    success = any_executable.timer || any_executable.subscription || any_executable.service || any_executable.client;//check if anything has returned
+    //if something returned next executable chosen
+  } 
+
+  if(!success) {
+    // Check the timers to see if there are any that are ready
+    memory_strategy_->get_next_timer(any_executable, weak_nodes_);
+    if (any_executable.timer) {
+      success = true;
+    }
   }
+  
   if (!success) {
     // Check the subscriptions to see if there are any that are ready
     memory_strategy_->get_next_subscription(any_executable, weak_nodes_);
@@ -627,12 +660,12 @@ Executor::get_next_ready_executable(AnyExecutable & any_executable)
 }
 
 bool
-Executor::get_next_executable(AnyExecutable & any_executable, std::chrono::nanoseconds timeout)
+Executor::get_next_executable(AnyExecutable & any_executable, std::chrono::nanoseconds timeout, const bool& higher_pr_first)
 {
   bool success = false;
   // Check to see if there are any subscriptions or timers needing service
   // TODO(wjwwood): improve run to run efficiency of this function
-  success = get_next_ready_executable(any_executable);
+  success = get_next_ready_executable(any_executable, higher_pr_first);
   // If there are none
   if (!success) {
     // Wait for subscriptions or timers to work on
@@ -641,7 +674,7 @@ Executor::get_next_executable(AnyExecutable & any_executable, std::chrono::nanos
       return false;
     }
     // Try again
-    success = get_next_ready_executable(any_executable);
+    success = get_next_ready_executable(any_executable, higher_pr_first);
   }
   return success;
 }

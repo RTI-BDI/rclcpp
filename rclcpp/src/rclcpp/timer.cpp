@@ -29,6 +29,19 @@ using rclcpp::TimerBase;
 TimerBase::TimerBase(
   rclcpp::Clock::SharedPtr clock,
   std::chrono::nanoseconds period,
+  rclcpp::Context::SharedPtr context,
+  const uint8_t& priority)
+: TimerBase(clock, period, context)
+{
+  if(priority < 99)
+    priority_ = priority;
+  else
+    priority_ = 0;
+}
+
+TimerBase::TimerBase(
+  rclcpp::Clock::SharedPtr clock,
+  std::chrono::nanoseconds period,
   rclcpp::Context::SharedPtr context)
 : clock_(clock), timer_handle_(nullptr)
 {

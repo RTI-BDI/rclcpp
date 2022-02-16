@@ -46,6 +46,9 @@ public:
 
   RCLCPP_PUBLIC
   explicit ServiceBase(std::shared_ptr<rcl_node_t> node_handle);
+  
+  RCLCPP_PUBLIC
+  explicit ServiceBase(std::shared_ptr<rcl_node_t> node_handle, const uint8_t& priority);
 
   RCLCPP_PUBLIC
   virtual ~ServiceBase();
@@ -121,6 +124,13 @@ public:
   bool
   exchange_in_use_by_wait_set_state(bool in_use_state);
 
+  void set_priority(const uint8_t& priority){
+    if(priority < 99)
+      priority_ = priority;
+  }
+
+  uint8_t get_priority(){return priority_;}
+
 protected:
   RCLCPP_DISABLE_COPY(ServiceBase)
 
@@ -138,6 +148,8 @@ protected:
   bool owns_rcl_handle_ = true;
 
   std::atomic<bool> in_use_by_wait_set_{false};
+
+  uint8_t priority_; //(Devis) priority within the callback group it belongs to, works only if callbackgroup is priority enabled
 };
 
 template<typename ServiceT>
@@ -171,8 +183,9 @@ public:
     std::shared_ptr<rcl_node_t> node_handle,
     const std::string & service_name,
     AnyServiceCallback<ServiceT> any_callback,
-    rcl_service_options_t & service_options)
-  : ServiceBase(node_handle), any_callback_(any_callback)
+    rcl_service_options_t & service_options,
+    const uint8_t& priority=0)
+  : ServiceBase(node_handle, priority), any_callback_(any_callback)
   {
     using rosidl_typesupport_cpp::get_service_type_support_handle;
     auto service_type_support_handle = get_service_type_support_handle<ServiceT>();
@@ -234,8 +247,9 @@ public:
   Service(
     std::shared_ptr<rcl_node_t> node_handle,
     std::shared_ptr<rcl_service_t> service_handle,
-    AnyServiceCallback<ServiceT> any_callback)
-  : ServiceBase(node_handle),
+    AnyServiceCallback<ServiceT> any_callback,
+    const uint8_t& priority=0)
+  : ServiceBase(node_handle, priority),
     any_callback_(any_callback)
   {
     // check if service handle was initialized
@@ -269,8 +283,9 @@ public:
   Service(
     std::shared_ptr<rcl_node_t> node_handle,
     rcl_service_t * service_handle,
-    AnyServiceCallback<ServiceT> any_callback)
-  : ServiceBase(node_handle),
+    AnyServiceCallback<ServiceT> any_callback,
+    const uint8_t& priority=0)
+  : ServiceBase(node_handle, priority),
     any_callback_(any_callback)
   {
     // check if service handle was initialized

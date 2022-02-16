@@ -18,6 +18,7 @@
 #include <future>
 #include <memory>
 
+#include "rclcpp/executors/dynamic_multi_threaded_executor.hpp"
 #include "rclcpp/executors/multi_threaded_executor.hpp"
 #include "rclcpp/executors/single_threaded_executor.hpp"
 #include "rclcpp/executors/static_single_threaded_executor.hpp"
@@ -50,7 +51,7 @@ spin(rclcpp::Node::SharedPtr node_ptr);
 
 namespace executors
 {
-
+using rclcpp::executors::DynamicMultiThreadedExecutor;
 using rclcpp::executors::MultiThreadedExecutor;
 using rclcpp::executors::SingleThreadedExecutor;
 

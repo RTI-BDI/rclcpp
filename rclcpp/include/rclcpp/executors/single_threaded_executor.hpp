@@ -65,6 +65,10 @@ public:
   void
   spin() override;
 
+  RCLCPP_PUBLIC
+  void
+  spin_highest_pr_first();
+
 private:
   RCLCPP_DISABLE_COPY(SingleThreadedExecutor)
 };

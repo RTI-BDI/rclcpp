@@ -84,6 +84,35 @@ public:
   get_next_timer(
     rclcpp::AnyExecutable & any_exec,
     const WeakNodeList & weak_nodes) = 0;
+  
+  virtual void
+  get_next_highest_pr_executable(
+    rclcpp::AnyExecutable & any_exec,
+    const WeakNodeList & weak_nodes) = 0;
+
+  virtual void
+  get_next_highest_pr_subscription(
+    rclcpp::AnyExecutable & any_exec,
+    const WeakNodeList & weak_nodes,
+    const bool& remove = true) = 0;
+
+  virtual void
+  get_next_highest_pr_service(
+    rclcpp::AnyExecutable & any_exec,
+    const WeakNodeList & weak_nodes,
+    const bool& remove = true) = 0;
+
+  virtual void
+  get_next_highest_pr_client(
+    rclcpp::AnyExecutable & any_exec,
+    const WeakNodeList & weak_nodes,
+    const bool& remove = true) = 0;
+
+  virtual void
+  get_next_highest_pr_timer(
+    rclcpp::AnyExecutable & any_exec,
+    const WeakNodeList & weak_nodes,
+    const bool& remove = true) = 0;
 
   virtual void
   get_next_waitable(

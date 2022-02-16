@@ -83,7 +83,7 @@ public:
 
   RCLCPP_PUBLIC
   rclcpp::CallbackGroup::SharedPtr
-  create_callback_group(rclcpp::CallbackGroupType group_type) override;
+  create_callback_group(rclcpp::CallbackGroupType group_type, bool priority_enabled = false) override;
 
   RCLCPP_PUBLIC
   rclcpp::CallbackGroup::SharedPtr

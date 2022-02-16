@@ -70,6 +70,14 @@ public:
   void
   spin() override;
 
+  /**
+   * \sa rclcpp::Executor:spin() for more details
+   * \throws std::runtime_error when spin() called while already spinning
+   */
+  RCLCPP_PUBLIC
+  void
+  spin(u_int8_t rt_prtiority);
+
   RCLCPP_PUBLIC
   size_t
   get_number_of_threads();

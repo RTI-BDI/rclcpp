@@ -47,6 +47,8 @@ struct AnyExecutable
   // These are used to keep the scope on the containing items
   rclcpp::CallbackGroup::SharedPtr callback_group;
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr node_base;
+  
+  uint8_t priority; // Priority defined by the user for the executable within its callback_group (which must be priority enabled!)
 };
 
 namespace executor

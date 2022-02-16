@@ -75,7 +75,8 @@ public:
     const rosidl_message_type_support_t & type_support_handle,
     const std::string & topic_name,
     const rcl_subscription_options_t & subscription_options,
-    bool is_serialized = false);
+    bool is_serialized = false,
+    const uint8_t& priority = 0);
 
   /// Default destructor.
   RCLCPP_PUBLIC
@@ -263,6 +264,13 @@ public:
   bool
   exchange_in_use_by_wait_set_state(void * pointer_to_subscription_part, bool in_use_state);
 
+  void set_priority(const uint8_t& priority){
+    if(priority < 99)
+      priority_ = priority;
+  }
+
+  uint8_t get_priority(){return priority_;}
+
 protected:
   template<typename EventCallbackT>
   void
@@ -298,6 +306,8 @@ protected:
   bool use_intra_process_;
   IntraProcessManagerWeakPtr weak_ipm_;
   uint64_t intra_process_subscription_id_;
+
+  uint8_t priority_;  //(Devis) priority within the callback group it belongs to, works only if callbackgroup is priority enabled
 
 private:
   RCLCPP_DISABLE_COPY(SubscriptionBase)

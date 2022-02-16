@@ -173,11 +173,11 @@ public:
    */
   RCLCPP_PUBLIC
   virtual void
-  spin_some(std::chrono::nanoseconds max_duration = std::chrono::nanoseconds(0));
+  spin_some(std::chrono::nanoseconds max_duration = std::chrono::nanoseconds(0), const bool& highest_pr_first = false);
 
   RCLCPP_PUBLIC
   virtual void
-  spin_once(std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1));
+  spin_once(std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1), const bool& highest_pr_first = false);
 
   /// Spin (blocking) until the future is complete, it times out waiting, or rclcpp is interrupted.
   /**
@@ -314,13 +314,14 @@ protected:
 
   RCLCPP_PUBLIC
   bool
-  get_next_ready_executable(AnyExecutable & any_executable);
+  get_next_ready_executable(AnyExecutable & any_executable, const bool& highest_pr_first = false);
 
   RCLCPP_PUBLIC
   bool
   get_next_executable(
     AnyExecutable & any_executable,
-    std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1));
+    std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1),
+    const bool& higher_pr_first = false);
 
   /// Spinning state, used to prevent multi threaded calls to spin and to cancel blocking spins.
   std::atomic_bool spinning;
@@ -348,7 +349,7 @@ protected:
 private:
   RCLCPP_PUBLIC
   void
-  spin_once_impl(std::chrono::nanoseconds timeout);
+  spin_once_impl(std::chrono::nanoseconds timeout, const bool& highest_pr_first = false);
 };
 
 namespace executor

@@ -37,3 +37,18 @@ SingleThreadedExecutor::spin()
     }
   }
 }
+
+void
+  SingleThreadedExecutor::spin_highest_pr_first()
+  {
+    if (spinning.exchange(true)) {
+      throw std::runtime_error("spin() called while already spinning");
+    }
+    RCLCPP_SCOPE_EXIT(this->spinning.store(false); );
+    while (rclcpp::ok(this->context_) && spinning.load()) {
+      rclcpp::AnyExecutable any_executable;
+      if (get_next_executable(any_executable, std::chrono::nanoseconds(50000), true)) {
+        execute_any_executable(any_executable);
+      }
+    }
+  }

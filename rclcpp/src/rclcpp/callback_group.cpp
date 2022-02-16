@@ -19,8 +19,8 @@
 using rclcpp::CallbackGroup;
 using rclcpp::CallbackGroupType;
 
-CallbackGroup::CallbackGroup(CallbackGroupType group_type)
-: type_(group_type), can_be_taken_from_(true)
+CallbackGroup::CallbackGroup(CallbackGroupType group_type, bool consider_priority)
+: type_(group_type), can_be_taken_from_(true), consider_priority_(consider_priority)
 {}
 
 

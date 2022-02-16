@@ -19,6 +19,7 @@
 #include <memory>
 #include <unordered_map>
 #include <vector>
+#include <pthread.h>
 
 #include "rclcpp/utilities.hpp"
 #include "rclcpp/scope_exit.hpp"
@@ -72,6 +73,41 @@ MultiThreadedExecutor::spin()
   }
 
   run(thread_id);
+  for (auto & thread : threads) {
+    thread.join();
+  }
+}
+
+void
+MultiThreadedExecutor::spin(u_int8_t rt_priority)
+{
+  if(rt_priority > 98)
+    rt_priority = 1;
+
+  if (spinning.exchange(true)) {
+    throw std::runtime_error("spin() called while already spinning");
+  }
+  RCLCPP_SCOPE_EXIT(this->spinning.store(false); );
+  std::vector<std::thread> threads;
+  size_t thread_id = 0;
+  if(rt_priority)
+  {
+    auto wait_mutex = MultiThreadedExecutor::wait_mutex_set_[this];
+    auto low_priority_wait_mutex = wait_mutex->get_low_priority_lockable();
+    std::lock_guard<MutexTwoPriorities::LowPriorityLockable> wait_lock(low_priority_wait_mutex);
+    for (; thread_id < number_of_threads_; ++thread_id) {
+      auto func = std::bind(&MultiThreadedExecutor::run, this, thread_id);
+      threads.emplace_back(func);
+      //(Devis) priority for threads
+      sched_param sch;
+      int policy; 
+      pthread_getschedparam(threads[thread_id].native_handle(), &policy, &sch);
+      sch.sched_priority = rt_priority;
+      if (pthread_setschedparam(threads[thread_id].native_handle(), SCHED_FIFO, &sch)) {
+          //Fail to set sched param
+      }
+    }
+  }
   for (auto & thread : threads) {
     thread.join();
   }

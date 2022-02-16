@@ -31,6 +31,15 @@ ServiceBase::ServiceBase(std::shared_ptr<rcl_node_t> node_handle)
 : node_handle_(node_handle)
 {}
 
+ServiceBase::ServiceBase(std::shared_ptr<rcl_node_t> node_handle, const uint8_t& priority)
+: node_handle_(node_handle)
+{
+  if(priority < 99)
+    priority_ = priority;
+  else
+    priority_ = 0;
+}
+
 ServiceBase::~ServiceBase()
 {}
 

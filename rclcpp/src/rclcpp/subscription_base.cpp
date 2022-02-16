@@ -36,7 +36,8 @@ SubscriptionBase::SubscriptionBase(
   const rosidl_message_type_support_t & type_support_handle,
   const std::string & topic_name,
   const rcl_subscription_options_t & subscription_options,
-  bool is_serialized)
+  bool is_serialized,
+  const uint8_t& priority)
 : node_base_(node_base),
   node_handle_(node_base_->get_shared_rcl_node_handle()),
   use_intra_process_(false),
@@ -44,6 +45,12 @@ SubscriptionBase::SubscriptionBase(
   type_support_(type_support_handle),
   is_serialized_(is_serialized)
 {
+
+  if(priority < 99)
+    priority_ = priority;
+  else
+    priority_ = 0;
+
   auto custom_deletor = [node_handle = this->node_handle_](rcl_subscription_t * rcl_subs)
     {
       if (rcl_subscription_fini(rcl_subs, node_handle.get()) != RCL_RET_OK) {

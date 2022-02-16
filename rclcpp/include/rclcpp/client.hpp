@@ -58,6 +58,12 @@ public:
   RCLCPP_PUBLIC
   ClientBase(
     rclcpp::node_interfaces::NodeBaseInterface * node_base,
+    rclcpp::node_interfaces::NodeGraphInterface::SharedPtr node_graph,
+    const uint8_t& priority);
+
+  RCLCPP_PUBLIC
+  ClientBase(
+    rclcpp::node_interfaces::NodeBaseInterface * node_base,
     rclcpp::node_interfaces::NodeGraphInterface::SharedPtr node_graph);
 
   RCLCPP_PUBLIC
@@ -150,6 +156,13 @@ public:
   bool
   exchange_in_use_by_wait_set_state(bool in_use_state);
 
+  void set_priority(const uint8_t& priority){
+    if(priority < 99)
+      priority_ = priority;
+  }
+
+  uint8_t get_priority(){return priority_;}
+
 protected:
   RCLCPP_DISABLE_COPY(ClientBase)
 
@@ -172,6 +185,8 @@ protected:
   std::shared_ptr<rcl_client_t> client_handle_;
 
   std::atomic<bool> in_use_by_wait_set_{false};
+
+  uint8_t priority_; //(Devis) priority within the callback group it belongs to, works only if callbackgroup is priority enabled
 };
 
 template<typename ServiceT>
@@ -211,7 +226,17 @@ public:
     rclcpp::node_interfaces::NodeGraphInterface::SharedPtr node_graph,
     const std::string & service_name,
     rcl_client_options_t & client_options)
-  : ClientBase(node_base, node_graph)
+    :
+    Client(node_base, node_graph, service_name, client_options, 0.0f)
+    {}
+
+  Client(
+    rclcpp::node_interfaces::NodeBaseInterface * node_base,
+    rclcpp::node_interfaces::NodeGraphInterface::SharedPtr node_graph,
+    const std::string & service_name,
+    rcl_client_options_t & client_options,
+    const uint8_t& priority)
+  : ClientBase(node_base, node_graph, priority)
   {
     using rosidl_typesupport_cpp::get_service_type_support_handle;
     auto service_type_support_handle =

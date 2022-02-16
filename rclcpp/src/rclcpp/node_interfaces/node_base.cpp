@@ -216,11 +216,11 @@ NodeBase::get_shared_rcl_node_handle() const
 }
 
 rclcpp::CallbackGroup::SharedPtr
-NodeBase::create_callback_group(rclcpp::CallbackGroupType group_type)
+NodeBase::create_callback_group(rclcpp::CallbackGroupType group_type, bool priority_enabled)
 {
   using rclcpp::CallbackGroup;
   using rclcpp::CallbackGroupType;
-  auto group = CallbackGroup::SharedPtr(new CallbackGroup(group_type));
+  auto group = CallbackGroup::SharedPtr(new CallbackGroup(group_type, priority_enabled));
   callback_groups_.push_back(group);
   return group;
 }

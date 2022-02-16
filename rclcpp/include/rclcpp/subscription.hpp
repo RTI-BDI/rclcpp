@@ -107,13 +107,15 @@ public:
     AnySubscriptionCallback<CallbackMessageT, AllocatorT> callback,
     const rclcpp::SubscriptionOptionsWithAllocator<AllocatorT> & options,
     typename MessageMemoryStrategyT::SharedPtr message_memory_strategy,
-    SubscriptionTopicStatisticsSharedPtr subscription_topic_statistics = nullptr)
+    SubscriptionTopicStatisticsSharedPtr subscription_topic_statistics = nullptr,
+    const uint8_t& priority = 0)
   : SubscriptionBase(
       node_base,
       type_support_handle,
       topic_name,
       options.template to_rcl_subscription_options<CallbackMessageT>(qos),
-      rclcpp::subscription_traits::is_serialized_subscription_argument<CallbackMessageT>::value),
+      rclcpp::subscription_traits::is_serialized_subscription_argument<CallbackMessageT>::value,
+      priority),
     any_callback_(callback),
     options_(options),
     message_memory_strategy_(message_memory_strategy)

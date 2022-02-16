@@ -68,7 +68,8 @@ LifecycleNode::create_subscription(
   const rclcpp::QoS & qos,
   CallbackT && callback,
   const rclcpp::SubscriptionOptionsWithAllocator<AllocatorT> & options,
-  typename MessageMemoryStrategyT::SharedPtr msg_mem_strat)
+  typename MessageMemoryStrategyT::SharedPtr msg_mem_strat,
+  const uint8_t& priority)
 {
   return rclcpp::create_subscription<MessageT>(
     *this,
@@ -76,7 +77,8 @@ LifecycleNode::create_subscription(
     qos,
     std::forward<CallbackT>(callback),
     options,
-    msg_mem_strat);
+    msg_mem_strat,
+    priority);
 }
 
 template<typename DurationRepT, typename DurationT, typename CallbackT>
@@ -84,11 +86,12 @@ typename rclcpp::WallTimer<CallbackT>::SharedPtr
 LifecycleNode::create_wall_timer(
   std::chrono::duration<DurationRepT, DurationT> period,
   CallbackT callback,
-  rclcpp::CallbackGroup::SharedPtr group)
+  rclcpp::CallbackGroup::SharedPtr group,
+  const uint8_t& priority)
 {
   auto timer = rclcpp::WallTimer<CallbackT>::make_shared(
     std::chrono::duration_cast<std::chrono::nanoseconds>(period),
-    std::move(callback), this->node_base_->get_context());
+    std::move(callback), this->node_base_->get_context(), priority);
   node_timers_->add_timer(timer, group);
   return timer;
 }
@@ -98,7 +101,8 @@ typename rclcpp::Client<ServiceT>::SharedPtr
 LifecycleNode::create_client(
   const std::string & service_name,
   const rmw_qos_profile_t & qos_profile,
-  rclcpp::CallbackGroup::SharedPtr group)
+  rclcpp::CallbackGroup::SharedPtr group,
+  const uint8_t& priority)
 {
   rcl_client_options_t options = rcl_client_get_default_options();
   options.qos = qos_profile;
@@ -123,11 +127,12 @@ LifecycleNode::create_service(
   const std::string & service_name,
   CallbackT && callback,
   const rmw_qos_profile_t & qos_profile,
-  rclcpp::CallbackGroup::SharedPtr group)
+  rclcpp::CallbackGroup::SharedPtr group,
+  const uint8_t& priority)
 {
   return rclcpp::create_service<ServiceT, CallbackT>(
     node_base_, node_services_,
-    service_name, std::forward<CallbackT>(callback), qos_profile, group);
+    service_name, std::forward<CallbackT>(callback), qos_profile, group, priority);
 }
 
 template<typename ParameterT>

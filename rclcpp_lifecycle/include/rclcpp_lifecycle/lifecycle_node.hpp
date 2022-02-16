@@ -179,7 +179,7 @@ public:
    */
   RCLCPP_LIFECYCLE_PUBLIC
   rclcpp::CallbackGroup::SharedPtr
-  create_callback_group(rclcpp::CallbackGroupType group_type);
+  create_callback_group(rclcpp::CallbackGroupType group_type, const bool& priority_enabled=false);
 
   /// Return the list of callback groups in the node.
   /**
@@ -235,7 +235,8 @@ public:
     create_default_subscription_options<AllocatorT>(),
     typename MessageMemoryStrategyT::SharedPtr msg_mem_strat = (
       MessageMemoryStrategyT::create_default()
-    )
+    ),
+    const uint8_t& priority = 0
   );
 
   /// Create a timer.
@@ -249,7 +250,8 @@ public:
   create_wall_timer(
     std::chrono::duration<DurationRepT, DurationT> period,
     CallbackT callback,
-    rclcpp::CallbackGroup::SharedPtr group = nullptr);
+    rclcpp::CallbackGroup::SharedPtr group = nullptr,
+    const uint8_t& priority = 0);
 
   /// Create and return a Client.
   /**
@@ -260,7 +262,8 @@ public:
   create_client(
     const std::string & service_name,
     const rmw_qos_profile_t & qos_profile = rmw_qos_profile_services_default,
-    rclcpp::CallbackGroup::SharedPtr group = nullptr);
+    rclcpp::CallbackGroup::SharedPtr group = nullptr,
+    const uint8_t& priority = 0);
 
   /// Create and return a Service.
   /**
@@ -272,7 +275,8 @@ public:
     const std::string & service_name,
     CallbackT && callback,
     const rmw_qos_profile_t & qos_profile = rmw_qos_profile_services_default,
-    rclcpp::CallbackGroup::SharedPtr group = nullptr);
+    rclcpp::CallbackGroup::SharedPtr group = nullptr,
+    const uint8_t& priority = 0);
 
   /// Declare and initialize a parameter, return the effective value.
   /**

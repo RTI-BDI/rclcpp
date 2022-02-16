@@ -159,9 +159,9 @@ LifecycleNode::get_logger() const
 
 rclcpp::CallbackGroup::SharedPtr
 LifecycleNode::create_callback_group(
-  rclcpp::CallbackGroupType group_type)
+  rclcpp::CallbackGroupType group_type, const bool& priority_enabled)
 {
-  return node_base_->create_callback_group(group_type);
+  return node_base_->create_callback_group(group_type, priority_enabled);
 }
 
 const rclcpp::ParameterValue &

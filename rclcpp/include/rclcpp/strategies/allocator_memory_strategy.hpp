@@ -286,6 +286,7 @@ public:
         }
         // Otherwise it is safe to set and return the any_exec
         any_exec.subscription = subscription;
+        any_exec.priority = subscription->get_priority();
         any_exec.callback_group = group;
         any_exec.node_base = get_node_by_group(group, weak_nodes);
         subscription_handles_.erase(it);
@@ -321,6 +322,7 @@ public:
         }
         // Otherwise it is safe to set and return the any_exec
         any_exec.service = service;
+        any_exec.priority = service->get_priority();
         any_exec.callback_group = group;
         any_exec.node_base = get_node_by_group(group, weak_nodes);
         service_handles_.erase(it);
@@ -354,6 +356,7 @@ public:
         }
         // Otherwise it is safe to set and return the any_exec
         any_exec.client = client;
+        any_exec.priority = client->get_priority();
         any_exec.callback_group = group;
         any_exec.node_base = get_node_by_group(group, weak_nodes);
         client_handles_.erase(it);
@@ -389,6 +392,7 @@ public:
         }
         // Otherwise it is safe to set and return the any_exec
         any_exec.timer = timer;
+        any_exec.priority = timer->get_priority();
         any_exec.callback_group = group;
         any_exec.node_base = get_node_by_group(group, weak_nodes);
         timer_handles_.erase(it);
@@ -397,6 +401,284 @@ public:
       // Else, the service is no longer valid, remove it and continue
       it = timer_handles_.erase(it);
     }
+  }
+
+  void 
+  get_next_highest_pr_executable(
+    rclcpp::AnyExecutable & any_exec,
+    const WeakNodeList & weak_nodes) override
+  {
+    int max_priority = 0;
+
+    //get highest priority exec within per lists, without removing it from them!
+    const int I_SUB = 0;    //index for subscription element
+    const int I_TIMER = 1;  //index for timer element
+    const int I_SRV = 2;    //index for service element
+    const int I_CLIENT = 3; //index for client element
+    std::vector<AnyExecutable> highest_pr_exec(4);
+
+    get_next_highest_pr_subscription(highest_pr_exec[I_SUB], weak_nodes, false);
+    get_next_highest_pr_timer(highest_pr_exec[I_TIMER], weak_nodes, false);
+    get_next_highest_pr_service(highest_pr_exec[I_SRV], weak_nodes, false);
+    get_next_highest_pr_client(highest_pr_exec[I_CLIENT], weak_nodes, false);
+
+    for(auto exec : highest_pr_exec)
+    {  
+      if(exec.priority >= max_priority)
+      {
+        max_priority = exec.priority;
+        any_exec = exec;//select executable with highest priority
+      }
+    }
+
+    //any_exec selected but not removed from respective handles list
+    if(any_exec.subscription)
+    {
+      get_next_highest_pr_subscription(any_exec, weak_nodes, true);
+      return;
+    }
+
+    if(any_exec.timer)
+    {
+      get_next_highest_pr_timer(any_exec, weak_nodes, true);
+      return;
+    }
+
+    if(any_exec.service)
+    {
+      get_next_highest_pr_service(any_exec, weak_nodes, true);
+      return;
+    }
+
+    if(any_exec.client)
+    {
+      get_next_highest_pr_client(any_exec, weak_nodes, true);
+      return;
+    }
+
+  }
+
+  void
+  get_next_highest_pr_subscription(
+    rclcpp::AnyExecutable & any_exec,
+    const WeakNodeList & weak_nodes,
+    const bool& remove) override 
+  {
+    int max_priority = 0;
+
+    auto it = subscription_handles_.begin();
+    auto it_best = subscription_handles_.end();
+    while (it != subscription_handles_.end()) {
+      auto subscription = get_subscription_by_handle(*it, weak_nodes);
+      if (subscription) {
+        // Find the group for this handle and see if it can be serviced
+        auto group = get_group_by_subscription(subscription, weak_nodes);
+        if (!group) {
+          // Group was not found, meaning the subscription is not valid...
+          // Remove it from the ready list and continue looking
+          it = subscription_handles_.erase(it);
+          continue;
+        }
+        if (!group->can_be_taken_from().load()) {
+          // Group is mutually exclusive and is being used, so skip it for now
+          // Leave it to be checked next time, but continue searching
+          ++it;
+          continue;
+        }
+
+        if(!group->uses_priority()) {
+          //group doesn't work with priority -> skip this item
+          ++it;
+          continue;
+        }
+
+        if(max_priority < subscription->get_priority())
+        {
+          //update best fit
+          max_priority = subscription->get_priority();
+
+          any_exec.subscription = subscription;
+          any_exec.callback_group = group;
+          any_exec.node_base = get_node_by_group(group, weak_nodes);
+          any_exec.priority = subscription->get_priority();
+
+          it_best = it;
+        }
+
+      }
+      // Else, the subscription is no longer valid, remove it and continue
+      it = subscription_handles_.erase(it);
+    }
+
+    if(it_best != subscription_handles_.end() && remove)//found best solution -> remove it from the sub handles
+      subscription_handles_.erase(it_best);
+  }
+
+  void
+  get_next_highest_pr_service(
+    rclcpp::AnyExecutable & any_exec,
+    const WeakNodeList & weak_nodes,
+    const bool& remove) override 
+  {
+    int max_priority = 0;
+
+    auto it = service_handles_.begin();
+    auto it_best = service_handles_.end();
+    while (it != service_handles_.end()) {
+      auto service = get_service_by_handle(*it, weak_nodes);
+      if (service) {
+        // Find the group for this handle and see if it can be serviced
+        auto group = get_group_by_service(service, weak_nodes);
+        if (!group) {
+          // Group was not found, meaning the service is not valid...
+          // Remove it from the ready list and continue looking
+          it = service_handles_.erase(it);
+          continue;
+        }
+        if (!group->can_be_taken_from().load()) {
+          // Group is mutually exclusive and is being used, so skip it for now
+          // Leave it to be checked next time, but continue searching
+          ++it;
+          continue;
+        }
+        
+        if(!group->uses_priority()) {
+          //group doesn't work with priority -> skip this item
+          ++it;
+          continue;
+        }
+
+        if(max_priority < service->get_priority())
+        {
+          //update best fit
+          max_priority = service->get_priority();
+
+          any_exec.service = service;
+          any_exec.callback_group = group;
+          any_exec.node_base = get_node_by_group(group, weak_nodes);
+          any_exec.priority = service->get_priority();
+
+          it_best = it;
+        }
+
+      }
+      // Else, the service is no longer valid, remove it and continue
+      it = service_handles_.erase(it);
+    }
+
+    if(it_best != service_handles_.end() && remove)//found best solution -> remove it from the srv handles
+      service_handles_.erase(it_best);
+  }
+
+  void
+  get_next_highest_pr_client(
+    rclcpp::AnyExecutable & any_exec,
+    const WeakNodeList & weak_nodes,
+    const bool& remove) override 
+  {
+    int max_priority = 0;
+
+    auto it = client_handles_.begin();
+    auto it_best = client_handles_.end();
+
+    while (it != client_handles_.end()) {
+      auto client = get_client_by_handle(*it, weak_nodes);
+      if (client) {
+        // Find the group for this handle and see if it can be serviced
+        auto group = get_group_by_client(client, weak_nodes);
+        if (!group) {
+          // Group was not found, meaning the service is not valid...
+          // Remove it from the ready list and continue looking
+          it = client_handles_.erase(it);
+          continue;
+        }
+        if (!group->can_be_taken_from().load()) {
+          // Group is mutually exclusive and is being used, so skip it for now
+          // Leave it to be checked next time, but continue searching
+          ++it;
+          continue;
+        }
+        
+        if(!group->uses_priority()) {
+          //group doesn't work with priority -> skip this item
+          ++it;
+          continue;
+        }
+
+        if(max_priority < client->get_priority())
+        {
+          //update best fit
+          max_priority = client->get_priority();
+
+          any_exec.client = client;
+          any_exec.callback_group = group;
+          any_exec.node_base = get_node_by_group(group, weak_nodes);
+          any_exec.priority = client->get_priority();
+
+          it_best = it;
+        }
+      }
+      // Else, the service is no longer valid, remove it and continue
+      it = client_handles_.erase(it);
+    }
+
+    if(it_best != client_handles_.end() && remove)//found best solution -> remove it from the client handles
+      client_handles_.erase(it_best);
+  }
+
+  void
+  get_next_highest_pr_timer(
+    rclcpp::AnyExecutable & any_exec,
+    const WeakNodeList & weak_nodes,
+    const bool& remove) override 
+  {
+    int max_priority = 0;
+
+    auto it = timer_handles_.begin();
+    auto it_best = timer_handles_.end();
+
+    while (it != timer_handles_.end()) {
+      auto timer = get_timer_by_handle(*it, weak_nodes);
+      if (timer) {
+        // Find the group for this handle and see if it can be serviced
+        auto group = get_group_by_timer(timer, weak_nodes);
+        if (!group) {
+          // Group was not found, meaning the timer is not valid...
+          // Remove it from the ready list and continue looking
+          it = timer_handles_.erase(it);
+          continue;
+        }
+        if (!group->can_be_taken_from().load()) {
+          // Group is mutually exclusive and is being used, so skip it for now
+          // Leave it to be checked next time, but continue searching
+          ++it;
+          continue;
+        }
+        if(!group->uses_priority()) {
+          //group doesn't work with priority -> skip this item
+          ++it;
+          continue;
+        }
+
+        if(max_priority < timer->get_priority())
+        {
+          //update best fit
+          max_priority = timer->get_priority();
+
+          any_exec.timer = timer;
+          any_exec.callback_group = group;
+          any_exec.node_base = get_node_by_group(group, weak_nodes);
+          any_exec.priority = timer->get_priority();
+
+          it_best = it;
+        }
+      }
+      // Else, the service is no longer valid, remove it and continue
+      it = timer_handles_.erase(it);
+    }
+
+    if(it_best != timer_handles_.end() && remove)//found best solution -> remove it from the timer handles
+      timer_handles_.erase(it_best);
   }
 
   void

@@ -57,7 +57,7 @@ public:
   RCLCPP_SMART_PTR_DEFINITIONS(CallbackGroup)
 
   RCLCPP_PUBLIC
-  explicit CallbackGroup(CallbackGroupType group_type);
+  explicit CallbackGroup(CallbackGroupType group_type, bool consider_priority = false);
 
   template<typename Function>
   rclcpp::SubscriptionBase::SharedPtr
@@ -102,6 +102,8 @@ public:
   const CallbackGroupType &
   type() const;
 
+  bool uses_priority(){return consider_priority_;}
+
 protected:
   RCLCPP_DISABLE_COPY(CallbackGroup)
 
@@ -142,6 +144,8 @@ protected:
   std::vector<rclcpp::ClientBase::WeakPtr> client_ptrs_;
   std::vector<rclcpp::Waitable::WeakPtr> waitable_ptrs_;
   std::atomic_bool can_be_taken_from_;
+
+  bool consider_priority_;// (Devis) bool to indicate if CallbackGroup make usage of priority
 
 private:
   template<typename TypeT, typename Function>

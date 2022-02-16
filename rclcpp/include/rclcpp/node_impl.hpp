@@ -93,7 +93,8 @@ Node::create_subscription(
   const rclcpp::QoS & qos,
   CallbackT && callback,
   const SubscriptionOptionsWithAllocator<AllocatorT> & options,
-  typename MessageMemoryStrategyT::SharedPtr msg_mem_strat)
+  typename MessageMemoryStrategyT::SharedPtr msg_mem_strat,
+  const uint8_t& priority)
 {
   return rclcpp::create_subscription<MessageT>(
     *this,
@@ -101,7 +102,8 @@ Node::create_subscription(
     qos,
     std::forward<CallbackT>(callback),
     options,
-    msg_mem_strat);
+    msg_mem_strat,
+    priority);
 }
 
 template<typename DurationRepT, typename DurationT, typename CallbackT>
@@ -109,14 +111,16 @@ typename rclcpp::WallTimer<CallbackT>::SharedPtr
 Node::create_wall_timer(
   std::chrono::duration<DurationRepT, DurationT> period,
   CallbackT callback,
-  rclcpp::CallbackGroup::SharedPtr group)
+  rclcpp::CallbackGroup::SharedPtr group,
+  const uint8_t& priority)
 {
   return rclcpp::create_wall_timer(
     period,
     std::move(callback),
     group,
     this->node_base_.get(),
-    this->node_timers_.get());
+    this->node_timers_.get(),
+    priority);
 }
 
 template<typename ServiceT>
@@ -124,7 +128,8 @@ typename Client<ServiceT>::SharedPtr
 Node::create_client(
   const std::string & service_name,
   const rmw_qos_profile_t & qos_profile,
-  rclcpp::CallbackGroup::SharedPtr group)
+  rclcpp::CallbackGroup::SharedPtr group,
+  const uint8_t& priority)
 {
   return rclcpp::create_client<ServiceT>(
     node_base_,
@@ -132,7 +137,7 @@ Node::create_client(
     node_services_,
     extend_name_with_sub_namespace(service_name, this->get_sub_namespace()),
     qos_profile,
-    group);
+    group, priority);
 }
 
 template<typename ServiceT, typename CallbackT>
@@ -141,15 +146,18 @@ Node::create_service(
   const std::string & service_name,
   CallbackT && callback,
   const rmw_qos_profile_t & qos_profile,
-  rclcpp::CallbackGroup::SharedPtr group)
+  rclcpp::CallbackGroup::SharedPtr group,
+  const uint8_t& priority)
 {
-  return rclcpp::create_service<ServiceT, CallbackT>(
+  auto srv = rclcpp::create_service<ServiceT, CallbackT>(
     node_base_,
     node_services_,
     extend_name_with_sub_namespace(service_name, this->get_sub_namespace()),
     std::forward<CallbackT>(callback),
     qos_profile,
-    group);
+    group, priority);
+
+  return srv;
 }
 
 template<typename ParameterT>
