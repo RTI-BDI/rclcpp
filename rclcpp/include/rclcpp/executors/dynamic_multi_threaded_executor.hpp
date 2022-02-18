@@ -18,6 +18,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <condition_variable>
 #include <set>
 #include <pthread.h>
 #include <limits.h>
@@ -69,12 +70,14 @@ public:
    * \param number_of_initial_consumers number of threads to initially have in the thread pool,
    *   the default 0 will use the number of cpu cores found instead
    * \param yield_between_dispatches if true std::this_thread::yield() is called after a dispatch
+   * \param dispatcher_core_bound bound always to the same core which will not be assigned to consumers (i.e. they'll have a complementary cpu_set mask)
    */
   RCLCPP_PUBLIC
   DynamicMultiThreadedExecutor(
     const rclcpp::ExecutorOptions & options = rclcpp::ExecutorOptions(),
     uint16_t number_of_initial_consumers = 0,
-    bool yield_between_dispatches = false);
+    bool yield_between_dispatches = false,
+    bool dispatcher_core_bound = false);
 
   RCLCPP_PUBLIC
   virtual ~DynamicMultiThreadedExecutor();
@@ -85,7 +88,17 @@ public:
    */
   RCLCPP_PUBLIC
   void
-  spin() override;
+  spin() override
+  {
+    spin(default_sched_policy_, default_dispatcher_pr_, default_consumer_base_pr_);
+  }
+
+  RCLCPP_PUBLIC
+  void
+  spin(const int& policy)
+  {
+    spin(policy, default_dispatcher_pr_, default_consumer_base_pr_);
+  }
 
   RCLCPP_PUBLIC
   void
@@ -93,7 +106,15 @@ public:
 
   RCLCPP_PUBLIC
   uint16_t
-  get_number_of_consumers();
+  get_number_of_starting_consumers(){return num_starting_consumers_;}
+
+  RCLCPP_PUBLIC
+  void
+  set_number_of_starting_consumers(const uint16_t& starting_consumers){num_starting_consumers_=starting_consumers;}
+
+  RCLCPP_PUBLIC
+  uint16_t
+  get_number_of_active_consumers(){return num_active_consumers_;}
 
   RCLCPP_PUBLIC
   int
@@ -105,6 +126,16 @@ public:
     if(policy == SCHED_OTHER || policy == SCHED_FIFO || policy == SCHED_RR || policy == SCHED_DEADLINE)
       default_sched_policy_ = policy;
   }
+
+  RCLCPP_PUBLIC
+  void
+  set_dispatcher_core_bound(const bool& dispatcher_core_bound){
+      dispatcher_core_bound_ = dispatcher_core_bound;
+  }
+
+  RCLCPP_PUBLIC
+  bool
+  get_dispatcher_core_bound(){ return dispatcher_core_bound_; }
 
   RCLCPP_PUBLIC
   uint8_t
@@ -133,10 +164,8 @@ public:
   }
 
   RCLCPP_PUBLIC
-  void
-  set_usleep_consumer(const uint32_t& usleep_consumer){
-      usleep_consumer_ = usleep_consumer;
-  }
+  uint32_t
+  get_uwait_dispatcher(){ return uwait_dispatcher_; }
 
 protected:
 
@@ -154,12 +183,17 @@ private:
   */
   static int wait_dispatcher(DispatcherData* dispatcher_data);
 
+  /*
+    Wrapper for consumers pthread cancel + join (accessed though the pointer to the DynamicMultiThreadedExecutor within the instance of DispatcherData)
+  */
+  static int terminate_spawned_consumers(DispatcherData* dispatcher_data);
+
 
   /*
     Utility function to initially spawn number_of_consumers_ with policy, base priority as specified in DispatcherData struct,
     where it's possible to find the reference to the respective DynamicMultiThreadedExecutor object
   */
-  static int spawn_new_consumers(DispatcherData* dispatcher_data);
+  static int spawn_starting_consumers(DispatcherData* dispatcher_data);
 
   /*
     Utility function to spawn A NEW consumer with policy, base priority as specified in DispatcherData struct,
@@ -181,7 +215,9 @@ private:
 
   /*
     Init pthread, pthread attr and sched params, busy + callbacks vectors
-    resize them wrt. current number_of_consumers_ value and initialize every single item to default values
+    resize them to max accepted value (at the moment ~128 statically defined) and initialize every single item to default values
+
+    IMPORTANT NOTE: member function: the ones above are all static!!!
   */
   void init_consumers_data();
   
@@ -196,34 +232,44 @@ private:
 
   // dispatcher running at the highest priority, repeatedly polling the ReadySet for work to dispatch to consumers (spawning one if needed)
   pthread_t dispatcher_;
+  
   // consumers thread running at the priority given by the callback 
   std::vector<pthread_t> consumers_;
+  //sched param and pthread attr for consumers
+  std::vector<struct sched_param> consumers_params_;
+  std::vector<pthread_attr_t> consumers_attr_;
+  
+  //consumers data
+  std::vector<ConsumerData> consumers_data_;
+  
+  // mutex for consumers' guard lock  
+  std::vector<std::mutex> consumers_mutex_;
+  // mutex for consumers' cv
+  std::vector<std::condition_variable> consumers_cv_;
 
   //sched param and pthread attr for dispatcher
   struct sched_param dispatcher_param_;
   pthread_attr_t dispatcher_attr_;
-
-  //sched param and pthread attr for consumers
-  std::vector<struct sched_param> consumers_params_;
-  std::vector<pthread_attr_t> consumers_attr_;
-  //consumers data
-  std::vector<ConsumerData> consumers_data_;
 
   //flag if a consumer thread is actively executing a callback
   std::vector<std::atomic_bool> busy_;
   //callbacks[i] contains the executable that must be handled by consumer thread i
   std::vector<rclcpp::AnyExecutable> callbacks_;
 
-  // number of consumer threads
-  uint16_t number_of_consumers_;
+  // number of initial consumer threads
+  uint16_t num_starting_consumers_;
+  // number of currently active consumer threads
+  uint16_t num_active_consumers_;
+
 
   // yield between dispatches
   bool yield_between_dispatches_;
 
+  // bound dispatcher to a core different than the one of the consumers
+  bool dispatcher_core_bound_;
+
   // usleep between dispatches
   uint32_t uwait_dispatcher_;
-  // usleep between consume
-  uint32_t usleep_consumer_;
 
 };
 
