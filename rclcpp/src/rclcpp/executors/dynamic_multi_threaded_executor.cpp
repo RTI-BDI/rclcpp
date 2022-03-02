@@ -1,4 +1,4 @@
-// Copyright 2015 Open Source Robotics Foundation, Inc.
+// Copyright 2022 Devis Dal Moro devis.dalmoro@unitn.it, University of Trento
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,32 +14,14 @@
 
 #include "rclcpp/executors/dynamic_multi_threaded_executor.hpp"
 
+#include <time.h>
 #include <chrono>
 #include <functional>
-#include <memory>
-#include <vector>
 
 #include "rclcpp/utilities.hpp"
 #include "rclcpp/scope_exit.hpp"
 
-#define MAX_CONSUMERS 128
-#define DEFAULT_UWAIT_DISPATCHER 5
-#define DEFAULT_USLEEP_CONSUMER 5
-
-
 using rclcpp::executors::DynamicMultiThreadedExecutor;
-
-// //size_t of local variables instantiated within dispatcher_run
-// size_t DISPATCHER_STACK_ADD = sizeof(rclcpp::AnyExecutable) + sizeof(int) * 2 + 
-//                                 sizeof(std::unique_lock<std::mutex>) + 
-//                                 sizeof(DynamicMultiThreadedExecutor*) +
-//                                 sizeof(DynamicMultiThreadedExecutor::DispatcherData*);
-
-// //size_t of local variables instantiated within consumer_run
-// size_t CONSUMER_STACK_ADD = sizeof(bool) + sizeof(uint16_t) + 
-//                                 sizeof(std::unique_lock<std::mutex>) + 
-//                                 sizeof(DynamicMultiThreadedExecutor*) +
-//                                 sizeof(DynamicMultiThreadedExecutor::ConsumerData*);
 
 static int pthread_setup(struct sched_param *param, pthread_attr_t *attr, const int &policy, const int &priority/*, const size_t &stack_size_add = 0*/)
 {
@@ -75,6 +57,7 @@ static int pthread_setup(struct sched_param *param, pthread_attr_t *attr, const 
 DynamicMultiThreadedExecutor::DynamicMultiThreadedExecutor(
     const rclcpp::ExecutorOptions &options,
     uint16_t number_of_initial_consumers,
+    uint16_t max_number_of_consumers,
     bool yield_between_dispatches,
     bool dispatcher_core_bound)
     : rclcpp::Executor(options),
@@ -85,10 +68,14 @@ DynamicMultiThreadedExecutor::DynamicMultiThreadedExecutor(
   uwait_dispatcher_  = DEFAULT_UWAIT_DISPATCHER;
   num_starting_consumers_ = number_of_initial_consumers ? number_of_initial_consumers : static_cast<uint16_t>(sysconf(_SC_NPROCESSORS_ONLN)); // std::thread::hardware_concurrency() specific implementation for linux (https://stackoverflow.com/questions/7341046/posix-equivalent-of-boostthreadhardware-concurrency)
   num_active_consumers_ = 0;
+  max_sec_consumer_wait_ = -1;//default behaviour does not let consumers go destroy themselves
+
+  num_max_consumers_ = (max_number_of_consumers>0)? max_number_of_consumers : 1;
+
   if (num_starting_consumers_ == 0)
     num_starting_consumers_ = 1;
-  else if(num_starting_consumers_ > MAX_CONSUMERS)
-    num_starting_consumers_ = MAX_CONSUMERS;
+  else if(num_starting_consumers_ > num_max_consumers_)
+    num_starting_consumers_ = num_max_consumers_;
 }
 
 DynamicMultiThreadedExecutor::~DynamicMultiThreadedExecutor() {}
@@ -140,14 +127,38 @@ int DynamicMultiThreadedExecutor::terminate_spawned_consumers(DispatcherData* di
   int err = 0;
   printf("Disabling all %d active consumers threads\n", dispatcher_data->dmt_executor->num_active_consumers_);
   //sending cancel signal to all active consumer threads
-  for(uint16_t i = 0; i<dispatcher_data->dmt_executor->num_active_consumers_; i++)
-    err += pthread_cancel(dispatcher_data->dmt_executor->consumers_[i]);
+  for(uint16_t i = 0; i<dispatcher_data->dmt_executor->num_max_consumers_; i++)
+    if(dispatcher_data->dmt_executor->consumers_status_[i].load() != CONS_DEAD)
+      err += pthread_cancel(dispatcher_data->dmt_executor->consumers_[i]);
 
   //wating for them to parse and respond to the cancel
-  for(uint16_t i = 0; i<dispatcher_data->dmt_executor->num_active_consumers_; i++)
-    err += pthread_join(dispatcher_data->dmt_executor->consumers_[i], NULL);
+  for(uint16_t i = 0; i<dispatcher_data->dmt_executor->num_max_consumers_; i++)
+    if(dispatcher_data->dmt_executor->consumers_status_[i].load() != CONS_DEAD)
+      err += pthread_join(dispatcher_data->dmt_executor->consumers_[i], NULL);
 
   return err;
+}
+
+
+char debug_str[1024];
+
+/*
+  Returns index of the first consumer with a certain status value within the consumers_status array
+*/
+static int get_first_consumer_by_status(const std::vector<std::atomic_int8_t>& consumers_status, 
+                                        const uint16_t& number_of_consumers,
+                                        const int8_t& CONS_STATUS)
+{
+  for(u_int16_t i=0; i < number_of_consumers; i++)
+  {
+    int status = consumers_status[i].load();
+    debug_str[i*2] = (char) ('0' + status);
+    debug_str[i*2+1] = ',';
+    if(status == CONS_STATUS)
+      return i;//free consumer
+  }
+  printf("%s\n", debug_str);
+  return -1;
 }
 
 /*
@@ -159,7 +170,7 @@ int DynamicMultiThreadedExecutor::spawn_starting_consumers(DispatcherData* dispa
   DynamicMultiThreadedExecutor* dmt_exec = ((DynamicMultiThreadedExecutor*) dispatcher_data->dmt_executor);
   int err = 0;
   for (int i = 0; !err && i < dmt_exec->num_starting_consumers_; i++)
-    err += spawn_new_consumer(dispatcher_data);
+    err += spawn_new_consumer(dispatcher_data).err;
 
   return err;
 }
@@ -167,29 +178,35 @@ int DynamicMultiThreadedExecutor::spawn_starting_consumers(DispatcherData* dispa
 /*
   Utility function to spawn A NEW consumer with policy, base priority as specified in DispatcherData struct,
   where it's possible to find the reference to the respective DynamicMultiThreadedExecutor object
-  num_active_consumers_ will be incremented, as busy and callback and the other relative structures
+  num_active_consumers_ will be incremented, as consumers_status_ and callback and the other relative structures
   All new consumer items will be put on the back of the current vectors
 */
-int DynamicMultiThreadedExecutor::spawn_new_consumer(DispatcherData* dispatcher_data)
+DynamicMultiThreadedExecutor::SpawningResult DynamicMultiThreadedExecutor::spawn_new_consumer(DispatcherData* dispatcher_data)
 {
+  auto res = SpawningResult{1, 0};
   DynamicMultiThreadedExecutor* dmt_exec = dispatcher_data->dmt_executor;
-  if(dmt_exec->num_active_consumers_ >= MAX_CONSUMERS)//no othre consumer can be spawned
-    return 1;
+  printf("Spawning new consumer (active consumers = %d, max consumers = %d)\n", dmt_exec->num_active_consumers_, dmt_exec->num_max_consumers_);
+  if(dmt_exec->num_active_consumers_ >= dmt_exec->num_max_consumers_)//no other consumer can be spawned
+    return res;
 
-  int err = 0;//return value (zero -> success, otherwise error code)
-  uint16_t new_cons_i = dmt_exec->num_active_consumers_;//new consumer index
+  res.err = 0;//return value (zero -> success, otherwise error code)
+  int new_cons_i = get_first_consumer_by_status(dmt_exec->consumers_status_, dmt_exec->num_max_consumers_, CONS_DEAD);//new consumer index
+  printf("Consumer %d ready to be spawned\n", new_cons_i);
   dmt_exec->num_active_consumers_++;
-
-  dmt_exec->busy_[new_cons_i].store(false);// new consumer is NOT busy
-  err += pthread_setup(&(dmt_exec->consumers_params_[new_cons_i]), &(dmt_exec->consumers_attr_[new_cons_i]), 
+  
+  if(dmt_exec->max_sec_consumer_wait_ > 0)
+    pthread_join(dispatcher_data->dmt_executor->consumers_[new_cons_i], NULL);//thread might have killed itself just an instant before
+  dmt_exec->consumers_status_[new_cons_i].store(CONS_WAIT);// new consumer is running and NOT busy
+  res.err += pthread_setup(&(dmt_exec->consumers_params_[new_cons_i]), &(dmt_exec->consumers_attr_[new_cons_i]), 
                           dispatcher_data->policy, dispatcher_data->base_consumer_priority/*, CONSUMER_STACK_ADD*/);
   
-
-  if(!err)
-    err += pthread_create(&(dmt_exec->consumers_[new_cons_i]), &(dmt_exec->consumers_attr_[new_cons_i]), 
+  printf("Consumer %d ready to be spawned: setup done err=%d \n", new_cons_i, res.err);
+  if(!res.err)
+    res.err += pthread_create(&(dmt_exec->consumers_[new_cons_i]), &(dmt_exec->consumers_attr_[new_cons_i]), 
                             DynamicMultiThreadedExecutor::consumer_run, &(dmt_exec->consumers_data_[new_cons_i]));
   
-  if(!err && dmt_exec->dispatcher_core_bound_)
+  printf("Consumer %d  spawned: create done err=%d \n", new_cons_i, res.err);
+  if(!res.err && dmt_exec->dispatcher_core_bound_)
   {
     uint8_t num_cores = static_cast<uint8_t>(sysconf(_SC_NPROCESSORS_ONLN));
     if(num_cores > 1)
@@ -204,40 +221,53 @@ int DynamicMultiThreadedExecutor::spawn_new_consumer(DispatcherData* dispatcher_
     }
   }
 
-  if(err)//creation failed -> rollback number of active consumers
-    dmt_exec->num_active_consumers_--;
+  if(res.err){
+    //creation failed -> rollback number of active consumers and selected consumer status
+    dmt_exec->num_active_consumers_--;  
+    dmt_exec->consumers_status_[new_cons_i].store(CONS_DEAD);
+  }
 
-  return err;
-}
-
-/*
-  Returns index of the first false boolean within the busy array
-*/
-static int get_free_consumer(const std::vector<std::atomic_bool>& busy, const uint16_t& number_of_consumers)
-{
-  for(u_int16_t i=0; i < number_of_consumers; i++)
-    if(!busy[i].load())
-      return i;//free consumer
-  return -1;
+  return res;
 }
 
 void *DynamicMultiThreadedExecutor::consumer_run(void *data)
 {
   ConsumerData* cons_data = (ConsumerData *)data;
   uint16_t my_i = cons_data->my_i;
+  printf("Consumer %d spawned!\n", my_i);
   bool kill_myself = false;
+  timespec start_wait, end_wait;
   DynamicMultiThreadedExecutor* dmt_exec = cons_data->dmt_executor;
   while (!kill_myself)
-  {
+  { 
     std::unique_lock<std::mutex> lck(dmt_exec->consumers_mutex_[my_i]);
-    dmt_exec->consumers_cv_[my_i].wait(lck, [&]() {return dmt_exec->busy_[my_i].load();});//block iff !busy
-    if(dmt_exec->busy_[my_i].load())
+    
+    if(dmt_exec->consumers_status_[my_i].load() != CONS_BUSY)
+    {
+      if(dmt_exec->max_sec_consumer_wait_ > 0)//register start of waiting
+        clock_gettime(CLOCK_MONOTONIC, &start_wait);
+
+      dmt_exec->consumers_cv_[my_i].wait(lck);//block iff !busy
+    }
+
+    if(dmt_exec->consumers_status_[my_i].load() == CONS_BUSY)
     {
       //work to do
       dmt_exec->execute_any_executable(dmt_exec->callbacks_[my_i]);
       dmt_exec->callbacks_[my_i] = AnyExecutable{};//callback executed
       pthread_setschedprio(dmt_exec->consumers_[my_i], dmt_exec->default_consumer_base_pr_);//reset my priority to default base pr for consumers
-      dmt_exec->busy_[my_i].store(false);//not busy anymore
+      dmt_exec->consumers_status_[my_i].store(CONS_WAIT);//not busy anymore
+    
+    }
+    else if(dmt_exec->max_sec_consumer_wait_ > 0)
+    {
+      clock_gettime(CLOCK_MONOTONIC, &end_wait);
+      
+      if( dmt_exec->max_sec_consumer_wait_ > (end_wait.tv_sec-start_wait.tv_sec)
+           ||
+          (dmt_exec->max_sec_consumer_wait_ == (end_wait.tv_sec-start_wait.tv_sec) && end_wait.tv_nsec >= start_wait.tv_nsec)
+      )
+        kill_myself = true;//surpassed time limit of waiting in idle
     }
   }
   return NULL;
@@ -248,6 +278,7 @@ void *DynamicMultiThreadedExecutor::dispatcher_run(void *data)
   DispatcherData* d_data = (DispatcherData *)data;
   DynamicMultiThreadedExecutor* dmt_exec = d_data->dmt_executor;
   int err = spawn_starting_consumers(d_data);
+  SpawningResult spawning_res;
 
   if (!err)
   {
@@ -255,20 +286,23 @@ void *DynamicMultiThreadedExecutor::dispatcher_run(void *data)
       rclcpp::AnyExecutable any_executable;
 
       if (dmt_exec->get_next_executable(any_executable, std::chrono::nanoseconds(dmt_exec->uwait_dispatcher_ * 1000), false)) {//wait for uwait_dispatcher_ for work to become available if none, before new polling
-        int free_cons_i = get_free_consumer(dmt_exec->busy_, dmt_exec->num_active_consumers_);
+        
+        int free_cons_i = get_first_consumer_by_status(dmt_exec->consumers_status_, dmt_exec->num_max_consumers_, CONS_WAIT);
+        printf("Getting free consumer %d to execute\n", free_cons_i);
         if(free_cons_i == -1)
         {
           //no free consumer, spawn new consumer thread
-          err = spawn_new_consumer(d_data);
-          if(err)//error during spawning
+          spawning_res = spawn_new_consumer(d_data);
+          if(spawning_res.err)//error during spawning
             continue;
 
-          free_cons_i = dmt_exec->num_active_consumers_ - 1;
+          free_cons_i = spawning_res.new_cons_i;
+          printf("Spawned new consumer %d to execute\n", free_cons_i);
         }
         
         dmt_exec->callbacks_[free_cons_i] = any_executable;//assign callback to selected consumer
         pthread_setschedprio(dmt_exec->consumers_[free_cons_i], any_executable.priority);//assign to the consumer thread its new priority
-        dmt_exec->busy_[free_cons_i].store(true);// mark the consumer as busy
+        dmt_exec->consumers_status_[free_cons_i].store(CONS_BUSY);// mark the consumer as busy
 
         std::unique_lock<std::mutex> lck(dmt_exec->consumers_mutex_[free_cons_i]);//acquire lock for signaling the waiting consumers
         dmt_exec->consumers_cv_[free_cons_i].notify_one();//notify passive waiting consumer
@@ -287,30 +321,30 @@ void *DynamicMultiThreadedExecutor::dispatcher_run(void *data)
 }
 
 /*
-  Init pthread, pthread attr and sched params, busy + callbacks vectors
+  Init pthread, pthread attr and sched params, consumers_status_ + callbacks vectors
   resize them to max accepted value (at the moment ~128 statically defined) and initialize every single item to default values
 */
-void DynamicMultiThreadedExecutor::init_consumers_data()
+void DynamicMultiThreadedExecutor::init_consumers_data(const int& max_consumers)
 {
   // For now avoid resizes later by putting each array to the maximum number of consumers
   // since the pointers to the single cell shall be passed to consumers, we want to avoid
   // that resizes with copy and paste of the original sized array (might be triggered by push_back too)
   // in a new area causes faulty access leading to brutal crashes
-  consumers_ = std::vector<pthread_t>(MAX_CONSUMERS);
-  consumers_params_ = std::vector<struct sched_param>(MAX_CONSUMERS);
-  consumers_attr_ = std::vector<pthread_attr_t>(MAX_CONSUMERS);
-  consumers_mutex_ = std::vector<std::mutex>(MAX_CONSUMERS);
-  consumers_cv_ = std::vector<std::condition_variable>(MAX_CONSUMERS);
-  busy_ = std::vector<std::atomic_bool>(MAX_CONSUMERS);
-  for (u_int16_t i = 0; i < MAX_CONSUMERS; i++)
+  consumers_ = std::vector<pthread_t>(max_consumers);
+  consumers_params_ = std::vector<struct sched_param>(max_consumers);
+  consumers_attr_ = std::vector<pthread_attr_t>(max_consumers);
+  consumers_mutex_ = std::vector<std::mutex>(max_consumers);
+  consumers_cv_ = std::vector<std::condition_variable>(max_consumers);
+  consumers_status_ = std::vector<std::atomic_int8_t>(max_consumers);
+  for (u_int16_t i = 0; i < max_consumers; i++)
   {
     consumers_data_.push_back(ConsumerData{this, i});
-    busy_[i].store(false);
+    consumers_status_[i].store(CONS_DEAD);//consumer status initially put to dead (i.e. not running)
   }
-  callbacks_ = std::vector<AnyExecutable>(MAX_CONSUMERS);
+  callbacks_ = std::vector<AnyExecutable>(max_consumers);
 }
 
-void DynamicMultiThreadedExecutor::spin(const int &policy, const uint8_t &dispatcher_pr, const uint8_t &base_consumer_pr)
+void DynamicMultiThreadedExecutor::spin(const int &policy, const uint8_t &dispatcher_base_pr, const uint8_t &base_consumer_pr)
 {
 
   if (spinning.exchange(true))
@@ -320,9 +354,9 @@ void DynamicMultiThreadedExecutor::spin(const int &policy, const uint8_t &dispat
   RCLCPP_SCOPE_EXIT(this->spinning.store(false););
 
   // init data for consumer threads
-  init_consumers_data();// resize pthread, pthread attr and sched params, busy + callbacks vectors
+  init_consumers_data(num_max_consumers_);// resize pthread, pthread attr and sched params, busy + callbacks vectors
   // init data for dispatcher thread and put it into the respective structure
-  DispatcherData dispatcher_data = DispatcherData{this, policy, dispatcher_pr, base_consumer_pr};
+  DispatcherData dispatcher_data = DispatcherData{this, policy, dispatcher_base_pr, base_consumer_pr};
 
   int err = 0;
 

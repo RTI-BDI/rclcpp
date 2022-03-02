@@ -1,4 +1,4 @@
-// Copyright 2014 Open Source Robotics Foundation, Inc.
+// Copyright 2022 Devis Dal Moro devis.dalmoro@unitn.it, University of Trento
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,23 +15,30 @@
 #ifndef RCLCPP__EXECUTORS__DYNAMIC_MULTI_THREADED_EXECUTOR_HPP_
 #define RCLCPP__EXECUTORS__DYNAMIC_MULTI_THREADED_EXECUTOR_HPP_
 
-#include <chrono>
-#include <memory>
-#include <mutex>
-#include <condition_variable>
-#include <set>
 #include <pthread.h>
 #include <limits.h>
 #include <unistd.h>
 #include <sched.h>
 #include <sys/mman.h>
-#include <unordered_map>
+
+#include <memory>
+#include <mutex>
+#include <condition_variable>
+#include <vector>
+#include <set>
 
 #include "rclcpp/detail/mutex_two_priorities.hpp"
 #include "rclcpp/executor.hpp"
 #include "rclcpp/macros.hpp"
 #include "rclcpp/memory_strategies.hpp"
 #include "rclcpp/visibility_control.hpp"
+
+#define MAX_CONSUMERS 128 //default max number of allowable consumers
+#define DEFAULT_UWAIT_DISPATCHER 5 //default us timeout for dispatcher, when waiting for next callback to be picked
+
+#define CONS_DEAD 2 // consumer thread is not running
+#define CONS_WAIT 0  // consumer thread is running, waiting for new work (NO busy waiting)
+#define CONS_BUSY 1  // consumer thread is running and executing a callback
 
 namespace rclcpp
 {
@@ -58,6 +65,11 @@ public:
     uint16_t my_i;
   } ConsumerData;
 
+  typedef struct{
+    int err;
+    uint16_t new_cons_i;
+  } SpawningResult;
+
   /// Constructor for DynamicMultiThreadedExecutor.
   /**
    * For the yield_before_execute option, when true std::this_thread::yield()
@@ -69,6 +81,7 @@ public:
    * \param options common options for all executors
    * \param number_of_initial_consumers number of threads to initially have in the thread pool,
    *   the default 0 will use the number of cpu cores found instead
+   * \param max_number_of_consumers max number of threads within the consumers thread pool
    * \param yield_between_dispatches if true std::this_thread::yield() is called after a dispatch
    * \param dispatcher_core_bound bound always to the same core which will not be assigned to consumers (i.e. they'll have a complementary cpu_set mask)
    */
@@ -76,6 +89,7 @@ public:
   DynamicMultiThreadedExecutor(
     const rclcpp::ExecutorOptions & options = rclcpp::ExecutorOptions(),
     uint16_t number_of_initial_consumers = 0,
+    uint16_t max_number_of_consumers = MAX_CONSUMERS,
     bool yield_between_dispatches = false,
     bool dispatcher_core_bound = false);
 
@@ -102,7 +116,7 @@ public:
 
   RCLCPP_PUBLIC
   void
-  spin(const int& policy, const uint8_t& dispatcher_pr, const uint8_t& base_consumer_pr);
+  spin(const int& policy, const uint8_t& dispatcher_base_pr, const uint8_t& base_consumer_pr);
 
   RCLCPP_PUBLIC
   uint16_t
@@ -111,6 +125,16 @@ public:
   RCLCPP_PUBLIC
   void
   set_number_of_starting_consumers(const uint16_t& starting_consumers){num_starting_consumers_=starting_consumers;}
+
+  RCLCPP_PUBLIC
+  uint16_t
+  get_max_number_of_consumers(){return num_max_consumers_;}
+
+  RCLCPP_PUBLIC
+  void
+  set_max_number_of_consumers(const uint16_t& max_consumers){
+    num_max_consumers_ = (max_consumers>0)? max_consumers : 1;
+  }
 
   RCLCPP_PUBLIC
   uint16_t
@@ -167,6 +191,16 @@ public:
   uint32_t
   get_uwait_dispatcher(){ return uwait_dispatcher_; }
 
+  RCLCPP_PUBLIC
+  void
+  set_max_consumer_wait(const int8_t& max_sec_consumer_wait){
+      max_sec_consumer_wait_ = max_sec_consumer_wait;
+  }
+
+  RCLCPP_PUBLIC
+  uint32_t
+  get_max_consumer_wait(){ return max_sec_consumer_wait_; }
+
 protected:
 
 private:
@@ -198,10 +232,10 @@ private:
   /*
     Utility function to spawn A NEW consumer with policy, base priority as specified in DispatcherData struct,
     where it's possible to find the reference to the respective DynamicMultiThreadedExecutor object
-    number_of_consumers_ will be incremented, as busy and callback and the other relative structures
+    number_of_consumers_ will be incremented, as consumers_status_ and callback and the other relative structures
     All new consumer items will be put on the back of the current vectors
   */
-  static int spawn_new_consumer(DispatcherData* dispatcher_data);
+  static SpawningResult spawn_new_consumer(DispatcherData* dispatcher_data);
 
   /*
     Function executed by the dispatcher thread
@@ -214,12 +248,12 @@ private:
   static void* consumer_run(void* data);
 
   /*
-    Init pthread, pthread attr and sched params, busy + callbacks vectors
+    Init pthread, pthread attr and sched params, consumers_status_ + callbacks vectors
     resize them to max accepted value (at the moment ~128 statically defined) and initialize every single item to default values
 
     IMPORTANT NOTE: member function: the ones above are all static!!!
   */
-  void init_consumers_data();
+  void init_consumers_data(const int& max_consumers);
   
   // default sched policy for spinning
   int default_sched_policy_;
@@ -251,8 +285,8 @@ private:
   struct sched_param dispatcher_param_;
   pthread_attr_t dispatcher_attr_;
 
-  //flag if a consumer thread is actively executing a callback
-  std::vector<std::atomic_bool> busy_;
+  //flag if a consumer thread is actively executing a callback, dead or waiting
+  std::vector<std::atomic_int8_t> consumers_status_;
   //callbacks[i] contains the executable that must be handled by consumer thread i
   std::vector<rclcpp::AnyExecutable> callbacks_;
 
@@ -260,7 +294,11 @@ private:
   uint16_t num_starting_consumers_;
   // number of currently active consumer threads
   uint16_t num_active_consumers_;
+  // number of maximum allowed consumer threads
+  uint16_t num_max_consumers_;
 
+  // max seconds to wait before killing the consumer
+  int8_t max_sec_consumer_wait_;
 
   // yield between dispatches
   bool yield_between_dispatches_;
