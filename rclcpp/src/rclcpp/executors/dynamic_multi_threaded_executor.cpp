@@ -247,7 +247,7 @@ void *DynamicMultiThreadedExecutor::consumer_run(void *data)
       if(dmt_exec->max_sec_consumer_wait_ > 0)//register start of waiting
         clock_gettime(CLOCK_MONOTONIC, &start_wait);
 
-      dmt_exec->consumers_cv_[my_i].wait(lck);//block iff !busy
+      dmt_exec->consumers_cv_[my_i].wait_for(lck, std::chrono::seconds(dmt_exec->max_sec_consumer_wait_));//block iff !busy
     }
 
     if(dmt_exec->consumers_status_[my_i].load() == CONS_BUSY)
