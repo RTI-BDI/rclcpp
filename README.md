@@ -35,6 +35,10 @@ In order the extensions made to existing classes are:
 
 - `Executor` has received an update wrt. to the methods to get the next executables (i.e. `get_next_ready_executable`, `get_next_executable`), in particular a boolean flag *highest_pr_first* (default value to `false`) marks whether to get the highest priority ready callback first. If none is present (e.g. no ready handles within the priority enabled callback groups), the original executor "scheduling flow" is going to take place. Consequently, `spin_once`, `spin_once_impl` and `spin_some` have been added with the very same flag as well, given the fact that they are the main callers for the previous mentioned methods;
 
+- `SingleThreadedExecutor`: alongside the default`spin()` call, the `spin_highest_pr_first()` has been added to support a scheduling behaviour in which the highest priority executable available from callback groups which are "priority enabled" is selected first for execution (i.e. copy and paste of the original method, where the`get_next_ready_executable` is called with *highest_pr_first* explicitly set to `true`);
+
+- `MultiThreadedExecutor`: alongside the default`spin()` call, the `spin(uint8 priority)` has been added to support the spawning of a executing threads with an explicit, user-set real time priority;
+
 ## DynamicMultiThreaded Executor
 The most important extension is about the introduction of a new Executor with a smarter and more real-time oriented scheduling and dispatching flow. Two main classes of threads are going to be spawned by it, specifically we have:
 - A **Dispatcher** per DynamicMultiThreadedExecutor instance which is going to run typically at a high rt priority value (set by the user) that whenever it finds anything into the readyset, it immediately dispatches it for execution to the first Consumer thread which is free to execute it, setting temporarily its real-time priority to the one of the handle it needs to execute. If no Consumer is available, a new one is going to be spawn (unless a user defined upper-bound has been already reached) and the callback execution will be delegate to it.
