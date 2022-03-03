@@ -267,7 +267,12 @@ void *DynamicMultiThreadedExecutor::consumer_run(void *data)
            ||
           (dmt_exec->max_sec_consumer_wait_ == (end_wait.tv_sec-start_wait.tv_sec) && end_wait.tv_nsec >= start_wait.tv_nsec)
       )
-        kill_myself = true;//surpassed time limit of waiting in idle
+      {
+        if(dmt_exec->consumers_status_[my_i].exchange(CONS_DEAD) == CONS_BUSY)
+          dmt_exec->consumers_status_[my_i].store(CONS_BUSY);//I became busy just instant before killing my self... pheeeew
+        else
+          kill_myself = true;//surpassed time limit of waiting in idle
+      }
     }
   }
   return NULL;
