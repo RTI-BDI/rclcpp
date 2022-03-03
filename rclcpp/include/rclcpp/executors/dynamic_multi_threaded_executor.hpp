@@ -35,6 +35,9 @@
 
 #define MAX_CONSUMERS 128 //default max number of allowable consumers
 #define DEFAULT_UWAIT_DISPATCHER 5 //default us timeout for dispatcher, when waiting for next callback to be picked
+#define DEFAULT_SCHED_POLICY SCHED_FIFO
+#define DEFAULT_SCHED_RT_PR_CONSUMER 1
+#define DEFAULT_SCHED_RT_PR_DISPATCHER 51
 
 #define CONS_DEAD 2 // consumer thread is not running
 #define CONS_WAIT 0  // consumer thread is running, waiting for new work (NO busy waiting)

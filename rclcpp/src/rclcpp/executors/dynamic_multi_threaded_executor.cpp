@@ -69,6 +69,9 @@ DynamicMultiThreadedExecutor::DynamicMultiThreadedExecutor(
   num_starting_consumers_ = number_of_initial_consumers ? number_of_initial_consumers : static_cast<uint16_t>(sysconf(_SC_NPROCESSORS_ONLN)); // std::thread::hardware_concurrency() specific implementation for linux (https://stackoverflow.com/questions/7341046/posix-equivalent-of-boostthreadhardware-concurrency)
   num_active_consumers_ = 0;
   max_sec_consumer_wait_ = -1;//default behaviour does not let consumers go destroy themselves
+  default_sched_policy_ = DEFAULT_SCHED_POLICY;
+  default_consumer_base_pr_ = DEFAULT_SCHED_RT_PR_CONSUMER;
+  default_dispatcher_pr_ = DEFAULT_SCHED_RT_PR_DISPATCHER;
 
   num_max_consumers_ = (max_number_of_consumers>0)? max_number_of_consumers : 1;
 
