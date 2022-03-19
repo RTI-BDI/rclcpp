@@ -160,7 +160,7 @@ static int get_first_consumer_by_status(const std::vector<std::atomic_int8_t>& c
     if(status == CONS_STATUS)
       return i;//free consumer
   }
-  printf("%s\n", debug_str);
+  printf("No consumer of type %d found in %s\n", CONS_STATUS, debug_str);
   return -1;
 }
 
@@ -194,41 +194,49 @@ DynamicMultiThreadedExecutor::SpawningResult DynamicMultiThreadedExecutor::spawn
 
   res.err = 0;//return value (zero -> success, otherwise error code)
   int new_cons_i = get_first_consumer_by_status(dmt_exec->consumers_status_, dmt_exec->num_max_consumers_, CONS_DEAD);//new consumer index
-  printf("Consumer %d ready to be spawned\n", new_cons_i);
-  dmt_exec->num_active_consumers_++;
-  
-  if(dmt_exec->max_sec_consumer_wait_ > 0)
-    pthread_join(dispatcher_data->dmt_executor->consumers_[new_cons_i], NULL);//thread might have killed itself just an instant before
-  dmt_exec->consumers_status_[new_cons_i].store(CONS_WAIT);// new consumer is running and NOT busy
-  res.err += pthread_setup(&(dmt_exec->consumers_params_[new_cons_i]), &(dmt_exec->consumers_attr_[new_cons_i]), 
-                          dispatcher_data->policy, dispatcher_data->base_consumer_priority/*, CONSUMER_STACK_ADD*/);
-  
-  printf("Consumer %d ready to be spawned: setup done err=%d \n", new_cons_i, res.err);
-  if(!res.err)
-    res.err += pthread_create(&(dmt_exec->consumers_[new_cons_i]), &(dmt_exec->consumers_attr_[new_cons_i]), 
-                            DynamicMultiThreadedExecutor::consumer_run, &(dmt_exec->consumers_data_[new_cons_i]));
-  
-  printf("Consumer %d  spawned: create done err=%d \n", new_cons_i, res.err);
-  if(!res.err && dmt_exec->dispatcher_core_bound_)
+  if(new_cons_i >= 0)
   {
-    uint8_t num_cores = static_cast<uint8_t>(sysconf(_SC_NPROCESSORS_ONLN));
-    if(num_cores > 1)
+    res.new_cons_i = new_cons_i;
+    printf("Consumer %d ready to be spawned\n", new_cons_i);
+    
+    if(dmt_exec->max_sec_consumer_wait_ > 0)
+      pthread_join(dispatcher_data->dmt_executor->consumers_[new_cons_i], NULL);//thread might have killed itself just an instant before
+    dmt_exec->consumers_status_[new_cons_i].store(CONS_WAIT);// new consumer is running and NOT busy
+    res.err += pthread_setup(&(dmt_exec->consumers_params_[new_cons_i]), &(dmt_exec->consumers_attr_[new_cons_i]), 
+                            dispatcher_data->policy, dispatcher_data->base_consumer_priority/*, CONSUMER_STACK_ADD*/);
+    
+    printf("Consumer %d ready to be spawned: setup done err=%d \n", new_cons_i, res.err);
+    if(!res.err)
+      res.err += pthread_create(&(dmt_exec->consumers_[new_cons_i]), &(dmt_exec->consumers_attr_[new_cons_i]), 
+                              DynamicMultiThreadedExecutor::consumer_run, &(dmt_exec->consumers_data_[new_cons_i]));
+    
+    printf("Consumer %d  spawned: create done err=%d \n", new_cons_i, res.err);
+    if(!res.err) 
     {
-      cpu_set_t t_cpu_set;
-      //bound consumers to all cores, except last one reserved for the dispatcher
-      CPU_ZERO(&t_cpu_set);
-      for(uint8_t i = 0; i<num_cores-2; i++)
-        CPU_SET(i, &t_cpu_set);
-      pthread_setaffinity_np(dmt_exec->consumers_[new_cons_i], sizeof(t_cpu_set),
-                          &t_cpu_set);
+      dmt_exec->num_active_consumers_++;
+
+      if(dmt_exec->dispatcher_core_bound_)//bound consumers to different core wrt. the one assigned to the dispatcher
+      {
+        uint8_t num_cores = static_cast<uint8_t>(sysconf(_SC_NPROCESSORS_ONLN));
+        if(num_cores > 1)
+        {
+          cpu_set_t t_cpu_set;
+          //bound consumers to all cores, except last one reserved for the dispatcher
+          CPU_ZERO(&t_cpu_set);
+          for(uint8_t i = 0; i<num_cores-2; i++)
+            CPU_SET(i, &t_cpu_set);
+          pthread_setaffinity_np(dmt_exec->consumers_[new_cons_i], sizeof(t_cpu_set),
+                              &t_cpu_set);
+        }
+      }
+    }
+    else
+    {
+      //creation failed -> rollback consumer status to DEAD
+      dmt_exec->consumers_status_[new_cons_i].store(CONS_DEAD);
     }
   }
-
-  if(res.err){
-    //creation failed -> rollback number of active consumers and selected consumer status
-    dmt_exec->num_active_consumers_--;  
-    dmt_exec->consumers_status_[new_cons_i].store(CONS_DEAD);
-  }
+  
 
   return res;
 }
@@ -296,16 +304,25 @@ void *DynamicMultiThreadedExecutor::dispatcher_run(void *data)
       if (dmt_exec->get_next_executable(any_executable, std::chrono::nanoseconds(dmt_exec->uwait_dispatcher_ * 1000), false)) {//wait for uwait_dispatcher_ for work to become available if none, before new polling
         
         int free_cons_i = get_first_consumer_by_status(dmt_exec->consumers_status_, dmt_exec->num_max_consumers_, CONS_WAIT);
-        printf("Getting free consumer %d to execute\n", free_cons_i);
+        printf("Getting free consumer %d to execute callback of type %s (pr = %d)\n", 
+          free_cons_i,
+          any_executable.timer? "timer" : any_executable.subscription? "subscription" : "srv or client",
+          any_executable.priority);
         if(free_cons_i == -1)
         {
           //no free consumer, spawn new consumer thread
+          printf("No free consumer found to execute callback of type %s (pr = %d)\n", 
+          any_executable.timer? "timer" : any_executable.subscription? "subscription" : "srv or client",
+          any_executable.priority);
           spawning_res = spawn_new_consumer(d_data);
           if(spawning_res.err)//error during spawning
             continue;
 
           free_cons_i = spawning_res.new_cons_i;
-          printf("Spawned new consumer %d to execute\n", free_cons_i);
+          printf("Spawned new consumer %d to execute callback of type %s (pr = %d)\n", 
+            free_cons_i,
+            any_executable.timer? "timer" : any_executable.subscription? "subscription" : "srv or client",
+            any_executable.priority);
         }
         
         dmt_exec->callbacks_[free_cons_i] = any_executable;//assign callback to selected consumer
