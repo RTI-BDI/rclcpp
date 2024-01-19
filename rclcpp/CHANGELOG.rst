@@ -2,6 +2,27 @@
 Changelog for package rclcpp
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.4.3 (2023-05-27)
+------------------
+* Do not attempt to use void allocators for memory allocation. (backport `#1657 <https://github.com/ros2/rclcpp/issues/1657>`_) (`#2004 <https://github.com/ros2/rclcpp/issues/2004>`_)
+* Contributors: Michel Hidalgo
+
+2.4.2 (2022-07-25)
+------------------
+* Add statistics for handle_loaned_message (`#1927 <https://github.com/ros2/rclcpp/issues/1927>`_) (`#1934 <https://github.com/ros2/rclcpp/issues/1934>`_)
+* Add test-dep ament_cmake_google_benchmark (`#1904 <https://github.com/ros2/rclcpp/issues/1904>`_) (`#1910 <https://github.com/ros2/rclcpp/issues/1910>`_)
+* Use parantheses around logging macro parameter (`#1820 <https://github.com/ros2/rclcpp/issues/1820>`_) (`#1823 <https://github.com/ros2/rclcpp/issues/1823>`_)
+* Contributors: Abrar Rahman Protyasha, Barry Xu, Gaël Écorchard
+
+2.4.1 (2022-01-31)
+------------------
+* Fix subscription instrumentation for ConstSharedPtr[WithInfo]Callback (`#1872 <https://github.com/ros2/rclcpp/issues/1872>`_)
+* Add node_waitables\_ to copy constructor (backport `#1799 <https://github.com/ros2/rclcpp/issues/1799>`_) (`#1834 <https://github.com/ros2/rclcpp/issues/1834>`_)
+* Fix returning invalid namespace if sub_namespace is empty (`#1658 <https://github.com/ros2/rclcpp/issues/1658>`_) (`#1811 <https://github.com/ros2/rclcpp/issues/1811>`_)
+* [service] Don't use a weak_ptr to avoid leaking (`#1668 <https://github.com/ros2/rclcpp/issues/1668>`_) (`#1669 <https://github.com/ros2/rclcpp/issues/1669>`_)
+* Use dynamic_pointer_cast to detect allocator mismatch in intra process manager (backport `#1643 <https://github.com/ros2/rclcpp/issues/1643>`_) (`#1645 <https://github.com/ros2/rclcpp/issues/1645>`_)
+* Contributors: Abrar Rahman Protyasha, Christophe Bedard, Ivan Santiago Paunovic, M. Hofstätter, Michel Hidalgo, Tomoya Fujita, William Woodall
+
 2.4.0 (2021-09-01)
 ------------------
 * Guard against integer overflow in duration conversion (`#1584 <https://github.com/ros2/rclcpp/issues/1584>`_) (`#1761 <https://github.com/ros2/rclcpp/issues/1761>`_)

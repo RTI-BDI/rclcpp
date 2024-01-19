@@ -3,6 +3,19 @@ Changelog for package rclcpp_action
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
+2.4.3 (2023-05-27)
+------------------
+* Revert "Revert "extract the result response before the callback is is… (backport `#2152 <https://github.com/ros2/rclcpp/issues/2152>`_) (`#2153 <https://github.com/ros2/rclcpp/issues/2153>`_)
+* Contributors: Tomoya Fujita
+
+2.4.2 (2022-07-25)
+------------------
+
+2.4.1 (2022-01-31)
+------------------
+* Add node_waitables\_ to copy constructor (backport `#1799 <https://github.com/ros2/rclcpp/issues/1799>`_) (`#1834 <https://github.com/ros2/rclcpp/issues/1834>`_)
+* Contributors: Abrar Rahman Protyasha, Tomoya Fujita
+
 2.4.0 (2021-09-01)
 ------------------
 * Fix occasionally missing goal result caused by race condition (`#1677 <https://github.com/ros2/rclcpp/issues/1677>`_) (`#1682 <https://github.com/ros2/rclcpp/issues/1682>`_)
